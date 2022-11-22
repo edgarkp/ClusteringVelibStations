@@ -1,0 +1,283 @@
+---
+author: "Edgar KOUAJIEP"
+date: '2022-11-22'
+output: word_document
+---
+
+# 3.1 Load the data
+```{r }
+rm(list = ls()) # clear the global environment 
+load("velib.Rdata")
+```
+
+#3.2 Pretreatment and descriptive analysis
+Let's observe the 10th first rows of the section $data$
+```{r }
+head(velib$data,10)
+```
+A row contains the values of the load at different recording times, each time being given by the variable Vi.
+```{r }
+names <- colnames(velib$data) # get the columns of the data
+
+result <- rep(0, length(names))
+for (i in 1:length(names))
+  colName = names[i]
+  result[i] = sum(is.nan(velib$data$colName))# verify any missing values
+
+result
+```
+There is no missing data on the section $data$. By doing the same for the other sections, we get to the same result. So the dataset is clean.
+
+Now let's visualize the data with their overall median (which will call for the study purpose the "grand median")
+```{r }
+medianall = median(apply(velib$data,2,median))
+boxplot(velib$data)
+abline(h=medianall,lty=2,col='red') # plot the overall median
+```
+This figure shows the distribution for each variable based on its value at each station. More objectively, it gives the distribution of the load at a specific period of time in a day (that spans a 1 hour). Also, we can see that the median , the 1st and 3rd quartile follow a certain sine-like pattern, implying that we can focus on just a portion of the data. The useful window of data will probably spans a day-like period which corresponds 24 observations. To verify that, we need to zoom on the boxplot and look at the section $dates$ from the dataset
+```{r }
+boxplot(velib$data[1:72])
+abline(h=medianall,lty=2,col='red') # plot the overall median
+
+velib$dates
+```
+As we predicted, we can cover a "daily" period by taking from "Dim-11" (or 11am on Sunday) to "Lun-10" (or 10 am on the next Monday) which spans from V1 to v24. So the 1st 24 observations will be our basis for the next step which is feature extraction.
+```{r }
+velib_data <- velib$data[1:24]
+```
+
+#3.3 Feature extraction
+At the beginning, we had 181 variables. Thanks to the descriptive analysis, we have 24 useful features now. In addition, the sine-like pattern we observed earlier gives us a clue on a possible strong correlation between the features. So we can use the famous PCA or Principal Component Analysis to perform dimension reduction.
+```{r }
+pc = princomp(velib_data) # estimate the matrix u
+plot(pc)
+summary(pc)
+```
+As we can see from the cumulative proportion, most of the information (ie 90% of them) are found in the 1st 4 PCA components (having the highest variances) . we can reduce our features ensemble to $d=4$ elements. However, note that the 3rd and 4th components don't hold that much of the information due to their low proportion of variance. It could indicate that perhaps the 1st 2 components could be enough
+
+Let's look at the Cattel Screee-test for confirmation
+```{r }
+cattell <- function(pc,tau=0.1){
+  
+  p = length(pc$sdev)
+  delta = abs(diff(pc$sdev)) # get the difference of standard deviation between each component
+  treshold = tau * max(delta) # calculate the threshold ie the elbow of the curve
+  
+  for (d in 1:(p-2)){
+    #identify the minimum dimension for which all posterio differences are smaller than the threshold
+    if (prod(delta[(d+1):(p-1)] < treshold)) break 
+  }
+  
+  plot(delta,type='b') # plot the posterio differences
+  abline(h=treshold,lty=2,col='red') # plot the threshold
+  abline(v=d,lty=3,col='green') #plot the optimal d
+  return(d)
+  
+}
+
+dstar = cattell(pc,tau = 0.1)
+```
+The pattern of the delta variable between the 1st and 4th index is due to the 3rd and 4th components having approximately the same variance whereas there is a big gap between the variance of the 2nd and 3rd component.
+In conclusion, the 1st 2 components are sufficient.
+
+Let's get the value of the PCA components
+```{r }
+pc$loadings[,1:2] 
+```
+Moreover, let's plot the variables in the new PCA coordinates system
+```{r }
+biplot(pc, col = c(0,2));box()
+biplot(pc, col = c(0,2),ylim = c(-0.04,0));box()
+biplot(pc, col = c(0,2),ylim = c(0,0.04));box()
+``` 
+Due to its high variance, the 1st component is obviously the one that holds most of the information.Plus, the projections of the initial feature vectors on that component have almost the same magnitude, making it difficult for extracting key differences between initial variables. Nevertheless, their projections on the 2nd component axis allow us to pin down groups of feature vectors, precisely feature's profiles :
+- the 1st group representing the low-load values profile :  Their 2nd component is always negative and the group is made of variables Vi where i goes from 1 to 10,including 23 and 24 too.  
+- the 2nd group representing the high-load values profile: Their 2nd component is always positive and the group is made of variables Vi where i goes from 11 to 22 . 
+
+The 2 groups can be identified on the box plot by looking at the position of their medians with respect to the grand median
+```{r }
+boxplot(velib_data)
+abline(h=medianall,lty=2,col='red') # plot the overall median
+
+#Recall that we can map those vectors to the actual recording time
+cat(velib$dates[1:10],velib$dates[23],velib$dates[24]) # low-load profile
+velib$dates[11:22] # high loading profile
+```
+As anticipated, the low-load feature vectors correspond to periods spanning from 9 am to 8 pm . Objectively, this is a period of high-frequent human activities. People during that period often use the velibs and therefore, those bikes are seldom left loaded during a long time.
+
+On the opposite, the high-load feature vectors correspond to periods between 9 pm to 8 am during which there are low-frequent human activities. In fact, People during that period seldom use the velibs and therefore, the velibs can load during a long time without frequent interruptions.
+
+#3.4 Clustering
+We will now use the projected data as our input to our clustering algorithms.
+```{r }
+velib_data_proj = pc$scores[,1:2] # get the projection of the data in the subspace
+```
+
+## 3.4.1 Hierarchical clustering
+Let's start using the Ward method for this clustering algorithm
+```{r }
+D = dist(velib_data_proj)
+out.hc = hclust(D, method = "ward.D2")
+plot(out.hc)
+```
+We see on the figure's right that there is a mark of degeneracy due to the stair-case effect. let's try other methods
+```{r }
+plot(hclust(D,method = "single"))
+plot(hclust(D,method = "complete"))
+plot(hclust(D,method = "average"))
+```
+The average method looks like the most stable and yields to the least degeneracy. Plus, if we cut at the middle of our largest gap, we cut through 2 branches. Let's go for 2 clusters.
+``` {r}
+K = 2;
+chosenMethod = "average"
+out.hc = hclust(D,method = chosenMethod)
+plot(out.hc)
+rect.hclust(out.hc,k=K,border='blue')
+```
+We can then use the `cutree` function to cut the tree in two and assign each velib station to a cluster.
+```{r}
+clusters = cutree(out.hc,k = K)
+```
+We can represent those clusters on a map using the leaflet library
+```{r }
+library('leaflet')
+palette = colorFactor("RdYlBu", domain = NULL)
+X = velib$position
+
+leaflet(X) %>% 
+  addTiles() %>% 
+  addCircleMarkers(radius = 3, lng = ~longitude , lat = ~latitude, 
+                   color = palette(clusters),stroke = FALSE,fillOpacity = 0.9) %>%
+  addLegend("bottomright", pal = palette, values = ~clusters,
+    title = "Cluster",
+    labFormat = labelFormat(prefix = ""),
+    opacity = 1
+  )
+```
+In terms of size, the 1st cluster has a broader range than the 2nd cluster. This last mostly reunites velib stations located at the South-West and South-East of Paris. It looks like it is linked to residential zones which are more family-oriented and less populated than the 1st cluster.
+
+Let's get the characteristics of the clusters by representing them in the PCA coordinate system and plotting the box plot of each cluster data in the initial vector axes 
+```{r}
+colorPalette = palette(rainbow(K))
+
+df_cluster = velib_data_proj[which(clusters == 1),1:2]
+plot(df_cluster,col = colorPalette[1],xlim=c(-3,3),ylim=c(-3,3))
+
+for (k in 2:K) {
+  df_cluster = velib_data_proj[which(clusters == k),1:2]
+  points(df_cluster[,1],df_cluster[,2], col = colorPalette[k])
+}
+legend(x = "topright", legend = c("Cluster 1", "Cluster 2"), fill = colorPalette)
+
+
+# Look at the boxplot of different variables of each cluster
+for (k in 1:K){
+  clusterName = paste("Cluster ",as.character(k))
+  boxplot(velib_data[which(clusters==k),], main=clusterName)
+  abline(h=medianall,lty=2,col='red') # plot the overall median
+}
+```
+Firstly, the 2 clusters are kind of symmetric. In fact, the 1st cluster has in general negative values on both components axes which is the total opposite of the 2nd cluster. Therefore, the 1st cluster has low loads levels. In the meantime, the 2nd cluster contains stations with high levels of loads.
+Also, Having steady low-load profiles in the 1st cluster matches with the regions it covers. As a matter of fact, people in those areas tend to constantly use the velibs at every period of the day. On the opposite, the 2nd cluster covers areas where people rarely use the velib, the high-load profiles thus mainly correlated to their lifestyle (family-oriented zones, meaning people will use their personal mean of transportation such as cars) 
+
+## 3.4.2 K-means
+Let's train the model and compute the clustering quality for each number of cluster to get the optimal one
+```{r }
+		kmax= 20 
+		nrep = 50
+		J = matrix(0, kmax, nrep) #init of J
+		for (k in 1:kmax) {
+		  for (n in 1:nrep) {
+		    out.kmeans = kmeans(velib_data_proj, centers = k) # train the model
+		    J[k,n]<- out.kmeans$betweenss / out.kmeans$totss # compute the criterion at each k and at each loop
+		  }
+		}
+		
+boxplot(t(J), col='blue')
+```
+Remark that the stability is improved after k=4 because it is the first time at which outliers are absent. From the elbow rule, a good choice for the number of identified clusters will be $k= 4$ . This value is different to what we obtain from hierarchical clustering. 
+
+Let's get the characteristics of the clusters by representing them in the PCA coordinate system and plotting the box plot of each cluster data in the initial vector axes 
+```{r}
+C = 4
+out.kmeans = kmeans(velib_data_proj, centers = C) # train the model
+centersKmeans = out.kmeans$centers
+clusters = out.kmeans$cluster
+
+colorPalette = palette(rainbow(C))
+pchPalette = sample(x=0:25)
+
+
+# The points
+df_cluster = velib_data_proj[which(clusters == 1),1:2]
+plot(df_cluster,col = colorPalette[1],xlim=c(-3,3),ylim=c(-3,3))
+# The centroid
+points(centersKmeans[1,1],centersKmeans[1,2], col = 'black' , pch = pchPalette[1],lwd=2) 
+
+
+for (c in 2:C) {
+  df_cluster = velib_data_proj[which(clusters == c),1:2]
+  #The points
+  points(df_cluster[,1],df_cluster[,2], col = colorPalette[c]) 
+  #The centroid
+  points(centersKmeans[c,1],centersKmeans[c,2],col = 'black', pch = pchPalette[c],lwd=2) 
+
+}
+
+legend(x = "topright", legend = c("Cluster 1", "Cluster 2", "Cluster 3", "Cluster 4"), fill = colorPalette)
+
+
+# Look at the boxplot of different variables of each cluster
+for (c in 1:C){
+  clusterName = paste("Cluster ",as.character(c))
+  boxplot(velib_data[which(clusters==c),], main=clusterName)
+  abline(h=medianall,lty=2,col='red') # plot the overall median
+}
+```
+Let's check the cluster's sizes:
+```{r}
+out.kmeans$size
+```
+Recalling that the 1st component carries the most amount of information, we can confirm (compared to the hierarchical clustering algorithm):
+- The group of steady low-load profiles are still the most represented  
+- We also found a cluster gathering the steady high-load profiles
+- There is a novelty that resides in the two new clusters which provide with new profiles described respectively as mid-low and mid-high. Those clusters are symmetric with respect to the 1st component axis. Note that the cluster of mid-high profiles is the least populated.
+
+In conclusion, even if the number of clusters is different between the 2 methods, we see that the kMeans algorithm kind of partitions in a more precise way than the hierarchical clustering algorithm. 
+
+We can classify the new clusters in terms of  :
+a) load profiles (from the highest to the lowest) : high -> mid-high -> mid-low -> low
+a) size (from the smallest to the largest) : mid-high -> high -> mid-low -> low
+
+Let's represent the clusters on the map
+```{r }
+library('leaflet')
+palette = colorFactor("RdYlBu", domain = NULL)
+X = velib$position
+
+leaflet(X) %>% 
+  addTiles() %>% 
+  addCircleMarkers(radius = 3, lng = ~longitude , lat = ~latitude, 
+                   color = palette(clusters),stroke = FALSE,fillOpacity = 0.9) %>%
+  addLegend("bottomright", pal = palette, values = ~clusters,
+    title = "Cluster",
+    labFormat = labelFormat(prefix = ""),
+    opacity = 1
+  )
+```
+The steady low-load profiles and steady high-load profiles clusters are found in the same areas detected by the hierarchical clustering. One peculiar result can be seen on the steady mid-high profiles cluster which encapsulates mostly the stations located at the very center of Paris. Meanwhile, the steady mid-low profiles cluster (which is symmetric to the mid-high as mentioned before) encapsulates mostly stations found at the edges of Paris.
+
+Another remark can be made on the :
+- 1st cluster found with the hierarchical clustering (low load) consisting of the low load and mid-low load clusters found with the kMeans and 
+- 2nd cluster foudn with the hierarchical clustering (high load) consisting of the high load and mid-high load clusters found with the kMeans
+
+For the easily-understandable clusters :
+- The low load profile is in fact related to heavily populated zones especially at Northern and Southern Paris. People always use the velib stations at almost every hour (supported maybe by the infrastructure, the less family-oriented vibes, the presence of many youngsters and nightlife activities)
+- The high load profile is in fact related to lowly populated and wealthy zones (South East and South West of Paris). Households are mostly made up of families and since they are close to the edges of Paris, they will either take the public transportation to go inward Paris or take their personal cars to go outwards Paris
+
+However, the new acute partitioning make it tough to find an explanation to the 2 new clusters but some clues can be enumerated:
+- For the mid-low load profiles with a strong geographical granularity: The cluster targets popular areas but not as popular as those of the low load profiles. since those areas are mainly found at the edges of Paris, there is a high chance that inhabitants work outside of Paris and will use their own mean of transportation (to get to their office for example)
+
+- For the mid-high load profiles and located mostly at the center of Paris: It could be due to the high accessibility and availability of public transport, a tendency to get around by foot, the high presence and  proximity of local businesses, etc
+
+
