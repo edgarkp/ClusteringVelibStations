@@ -3,6 +3,7 @@ author: "Edgar KOUAJIEP"
 date: '2022-11-22'
 #output: word_document
 output: rmarkdown::github_document
+always_allow_html: true
 ---
 
 # 3.1 Load the data
@@ -266,6 +267,8 @@ leaflet(X) %>%
     opacity = 1
   )
 ```
+PS: To render correctly this map, you can only run the chunks in your RStudio.
+
 The steady low-load profiles and steady high-load profiles clusters are found in the same areas detected by the hierarchical clustering. One peculiar result can be seen on the steady mid-high profiles cluster which encapsulates mostly the stations located at the very center of Paris. Meanwhile, the steady mid-low profiles cluster (which is symmetric to the mid-high as mentioned before) encapsulates mostly stations found at the edges of Paris.
 
 Another remark can be made on the :
