@@ -411,7 +411,8 @@ As we predicted, we can cover a “daily” period by taking from “Dim-11” (
 velib_data <- velib$data[1:24]
 ```
 
-# 3.3 Feature extraction At the beginning, we had 181 variables. 
+# 3.3 Feature extraction 
+At the beginning, we had 181 variables. 
 Thanks to the descriptive analysis, we have 24 useful features now. In addition, the sine-like pattern we observed earlier gives us a clue on a possible strong correlation between the features. So we can use the famous PCA or Principal Component Analysis to perform dimension
 reduction.
 
